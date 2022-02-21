@@ -104,35 +104,6 @@ class WaveApiClient
         return $response->getData();
     }
 
-    public function getSalesTaxes(string $businessId) : array
-    {
-        $query = <<<'QUERY'
-        query($id: ID!) {
-            business(id: $id) {
-                salesTaxes(page:1, pageSize: 10) {
-                    edges {
-                        node {
-                            id
-                            name
-                            rate
-                        }
-                    }
-                }
-            }
-        }
-        QUERY;
-
-        $response = $this->graphql_client->query($query, ['id' => $businessId]);
-
-        if ($response->hasErrors()) {
-            $exception = new WaveApiClientException('Error fetching businesses');
-            $exception->setErrors($response->getErrors());
-            throw $exception;
-        }
-
-        return $response->getData();
-    }
-
     public function createTransaction(array $payload)
     {
         $query = <<<'QUERY'

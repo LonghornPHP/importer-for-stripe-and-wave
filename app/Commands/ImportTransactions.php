@@ -22,7 +22,6 @@ class ImportTransactions extends Command
                             {--date= : The first date to pull transactions from (Y-m-d, UTC)}
                             {--business= : Business name}
                             {--anchor= : Anchor account name}
-                            {--salestax= : Sales tax account name}
                             {--sales= : Sales account name}
                             {--sponsorships= : Sponsorships account name}
                             {--stripe= : Stripe fees account name}';
@@ -55,7 +54,6 @@ class ImportTransactions extends Command
     {
         $business_id = $this->getBusinessId();
 
-        [$sales_tax_account_id, $sales_tax_account_rate] = $this->getSalesTaxAccount($business_id);
         $anchor_account_id = $this->getAnchorAccountId($business_id);
         $stripe_fee_account_id = $this->getStripeFeeAccountId($business_id);
         $ticket_account_id = $this->getTicketSalesAccountId($business_id);
@@ -96,7 +94,7 @@ class ImportTransactions extends Command
             ->reduce(fn($carry, $transaction) => ($carry + $transaction->amount), 0);
             if ($sponsorships_total !== 0) {
                 $payload['input']['lineItems'][] = [
-                    'amount' => abs($sponsorships_total) / 100,
+                    'amount' => (float)(abs($sponsorships_total) / 100),
                     'accountId' => $sponsorship_account_id,
                     'balance' => $sponsorships_total > 0 ? 'CREDIT' : 'DEBIT',
                     'description' => 'Sponsorships' . ($sponsorships_total > 0 ? '' : ' (Refund)')
@@ -110,7 +108,7 @@ class ImportTransactions extends Command
             if ($sponsorships_fee_total !== 0) {
                 $payload['input']['lineItems'][] = [
                     'accountId' => $stripe_fee_account_id,
-                    'amount' => $sponsorships_fee_total / 100,
+                    'amount' => (float)($sponsorships_fee_total / 100),
                     'balance' => 'DEBIT',
                     'description' => 'Sponsorship Stripe fees',
                 ];
@@ -121,19 +119,11 @@ class ImportTransactions extends Command
             })
             ->reduce(fn($carry, $transaction) => ($carry + $transaction->amount), 0);
             if ($sales_total !== 0) {
-                $sales_tax_amount = (
-                    abs($sales_total)
-                    - abs($sales_total / (1 + $sales_tax_account_rate))
-                ) / 100;
                 $payload['input']['lineItems'][] = [
-                    'amount' => abs($sales_total) / 100,
+                    'amount' => (float)(abs($sales_total) / 100),
                     'accountId' => $ticket_account_id,
                     'balance' => $sales_total > 0 ? 'CREDIT' : 'DEBIT',
                     'description' => 'Total ticket purchases amount' . ($sales_total > 0 ? '' : ' (Refund)'),
-                    'taxes' => [
-                        'salesTaxId' => $sales_tax_account_id,
-                        'amount' => round($sales_tax_amount, 2)
-                    ]
                 ];
             }
 
@@ -144,7 +134,7 @@ class ImportTransactions extends Command
             if ($sales_fee_total !== 0 && $sales_total > 0) {
                 $payload['input']['lineItems'][] = [
                     'accountId' => $stripe_fee_account_id,
-                    'amount' => $sales_fee_total / 100,
+                    'amount' => (float)($sales_fee_total / 100),
                     'balance' => 'DEBIT',
                     'description' => 'Stripe fees',
                 ];
@@ -154,6 +144,7 @@ class ImportTransactions extends Command
                 try {
                     $this->wave->createTransaction($payload);
                 } catch (WaveApiClientException $e) {
+                    dump($payload);
                     dump($e->getMessage());
                     dump($e->getErrors());
                 }
@@ -258,35 +249,6 @@ class ImportTransactions extends Command
         $this->line('You selected account `' . $account . '` as the stripe fee account.');
 
         return $accounts->where('node.name', $account)->first()['node']['id'];
-    }
-
-    protected function getSalesTaxAccount(string $business_id)
-    {
-        try {
-            $accounts = $this->wave->getSalesTaxes($business_id);
-        } catch (WaveApiClientException $e) {
-            $this->error($e->getMessage());
-            $this->error(json_encode($e->getErrors()));
-            exit;
-        }
-        $accounts = collect($accounts['business']['salesTaxes']['edges'] ?? []);
-
-        $acct_name = $this->option('salestax');
-        if ($acct_name && $account = $accounts->where('node.name', $acct_name)->first()) {
-            return [$account['node']['id'], $account['node']['rate']];
-        }
-
-        $account = $this->choice(
-            'Which account should be used for sales tax?',
-            $accounts->pluck('node.name')->all(),
-        );
-
-        $this->line('You selected account `' . $account . '` as the sales tax account.');
-
-        return [
-            $accounts->where('node.name', $account)->first()['node']['id'],
-            $accounts->where('node.name', $account)->first()['node']['rate'],
-        ];
     }
 
     protected function getAccounts(string $business_id)
